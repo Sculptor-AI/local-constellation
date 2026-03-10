@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "local-constellation"
+version = "0.1.0"
+description = "Local control plane for pulling Hugging Face models and serving them with llama.cpp."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi>=0.115.0,<1.0.0",
+  "huggingface_hub>=0.30.0,<1.0.0",
+  "pydantic-settings>=2.6.0,<3.0.0",
+  "uvicorn[standard]>=0.34.0,<1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.28.0,<1.0.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

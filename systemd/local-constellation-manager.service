@@ -1,0 +1,19 @@
+[Unit]
+Description=local-constellation control plane
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=llm
+Group=llm
+WorkingDirectory=/opt/local-constellation
+EnvironmentFile=/opt/local-constellation/.env
+ExecStart=/opt/local-constellation/.venv/bin/python -m local_constellation
+Restart=on-failure
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

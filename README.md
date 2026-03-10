@@ -1,0 +1,146 @@
+# local-constellation
+
+`local-constellation` is a thin control plane for a Pop!_OS NVIDIA host that:
+
+- pulls GGUF models from Hugging Face
+- downloads safetensors repos and converts them to GGUF with `llama.cpp`
+- optionally quantizes converted GGUFs
+- starts and stops `llama-server`, which exposes the actual OpenAI-compatible inference API
+
+The control API runs on port `9000` by default. `llama-server` runs on port `8080` by default and serves `/v1/chat/completions`.
+
+## Architecture
+
+1. `POST /models/pull` inspects a Hugging Face repo.
+2. If the repo contains a GGUF and you select it, the file is downloaded directly.
+3. Otherwise the repo is downloaded locally and `vendor/llama.cpp/convert_hf_to_gguf.py` creates a GGUF.
+4. If requested, `llama-quantize` creates a smaller quantized GGUF.
+5. `POST /server/start` launches `llama-server` against a local GGUF.
+
+This split keeps model acquisition and lifecycle in the manager API while `llama-server` handles inference.
+
+## What I verified locally
+
+- The repo was empty, so this project was scaffolded from scratch.
+- WSL is available as Ubuntu 22.04.
+- Current WSL does not have a working NVIDIA NVML path or `cmake`, so I could not do a real CUDA build from this machine.
+- The implementation targets the Pop!_OS Linux server for the actual build and runtime.
+
+## Pop!_OS setup
+
+On the Linux server:
+
+```bash
+git clone <your-repo-url> /opt/local-constellation
+cd /opt/local-constellation
+chmod +x scripts/setup_popos.sh scripts/run_manager.sh
+./scripts/setup_popos.sh
+cp .env.example .env
+```
+
+Edit `.env` if you want different paths or ports. The defaults keep models and runtime state under the repo:
+
+- `data/models`
+- `data/runtime`
+- `data/hf-cache`
+- `vendor/llama.cpp`
+
+Start the manager API:
+
+```bash
+./scripts/run_manager.sh
+```
+
+The manager API defaults to [http://0.0.0.0:9000](http://0.0.0.0:9000) and the generated docs are at `/docs`.
+
+## Pull a GGUF
+
+```bash
+curl -X POST http://127.0.0.1:9000/models/pull \
+  -H "Content-Type: application/json" \
+  -d '{
+    "repo_id": "bartowski/Llama-3.2-3B-Instruct-GGUF",
+    "filename": "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+    "prefer_gguf": true
+  }'
+```
+
+If the repo contains multiple GGUF files, `filename` is required so the manager does not guess the wrong quantization.
+
+## Pull safetensors and convert
+
+```bash
+curl -X POST http://127.0.0.1:9000/models/pull \
+  -H "Content-Type: application/json" \
+  -d '{
+    "repo_id": "Qwen/Qwen2.5-7B-Instruct",
+    "prefer_gguf": false,
+    "outtype": "f16",
+    "quantization": "Q4_K_M"
+  }'
+```
+
+Notes:
+
+- `prefer_gguf: false` forces a safetensors workflow.
+- Converting safetensors requires the extra Python dependencies installed from `vendor/llama.cpp/requirements/requirements-convert_hf_to_gguf.txt`.
+- For private or gated repos, set `HF_TOKEN` in `.env` or pass `token` in the request body.
+
+## Start llama-server
+
+Use the `gguf_path` returned by `/models/pull`:
+
+```bash
+curl -X POST http://127.0.0.1:9000/server/start \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "/opt/local-constellation/data/models/bartowski--Llama-3.2-3B-Instruct-GGUF/main/raw/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+    "alias": "llama-3.2-3b",
+    "host": "0.0.0.0",
+    "port": 8080,
+    "ctx_size": 8192,
+    "n_gpu_layers": 999
+  }'
+```
+
+Once it is running, query the inference API directly:
+
+```bash
+curl http://127.0.0.1:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llama-3.2-3b",
+    "messages": [
+      {"role": "system", "content": "You are concise."},
+      {"role": "user", "content": "Say hello."}
+    ]
+  }'
+```
+
+## Endpoints
+
+- `GET /health`
+- `GET /models`
+- `POST /models/pull`
+- `GET /server`
+- `POST /server/start`
+- `POST /server/stop`
+
+## systemd
+
+An example unit file is included at `systemd/local-constellation-manager.service`.
+
+Typical install flow:
+
+```bash
+sudo cp systemd/local-constellation-manager.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now local-constellation-manager
+```
+
+Before enabling it, update the unit file so `User`, `Group`, `WorkingDirectory`, `EnvironmentFile`, and `ExecStart` match your actual deployment path and service account.
+
+## Limits
+
+- I did not run a CUDA build locally because the current WSL environment does not expose a usable NVIDIA stack.
+- I did not run end-to-end model downloads here because that would require both `llama.cpp` and large model artifacts.
