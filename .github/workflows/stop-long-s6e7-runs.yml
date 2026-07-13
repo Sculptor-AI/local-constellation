@@ -1,0 +1,22 @@
+name: Stop Superseded S6E7 Runs
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/stop-long-s6e7-runs.yml"
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cancel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel superseded long-running experiments
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST repos/${{ github.repository }}/actions/runs/29285094433/cancel || true
+          gh api --method POST repos/${{ github.repository }}/actions/runs/29285898615/cancel || true
