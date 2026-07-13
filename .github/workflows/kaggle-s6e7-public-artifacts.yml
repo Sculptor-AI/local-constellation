@@ -28,11 +28,15 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install pandas requests kaggle kagglehub
 
-      - name: Acquire sample submission for validation
+      - name: Acquire exact competition and original source files
         run: |
           git clone --no-tags https://github.com/1644heihei/Kaggle_Predicting_Student_Health_Risk.git competition-mirror
           cd competition-mirror
           git checkout eb6228d4633f87aeb7861c6801664dd0df543390
+          cd ..
+          git clone --no-tags https://github.com/the-yuyut/Predicting-Student-Health-Risk.git source-mirror
+          cd source-mirror
+          git checkout e80a8d25923f3a48f530106095aa631163940575
 
       - name: Retrieve public kernel outputs and submissions
         run: |
@@ -42,12 +46,13 @@ jobs:
             --output public_outputs \
             2>&1 | tee public_outputs/retrieval.log
 
-      - name: Package exact verified competition files
+      - name: Package exact verified data files
         run: |
           mkdir -p public_outputs/exact_data
           cp competition-mirror/data/train.csv public_outputs/exact_data/
           cp competition-mirror/data/test.csv public_outputs/exact_data/
           cp competition-mirror/data/sample_submission.csv public_outputs/exact_data/
+          cp source-mirror/data/original_student_health_50k.csv public_outputs/exact_data/
           sha256sum public_outputs/exact_data/*.csv > public_outputs/exact_data/SHA256SUMS.txt
 
       - name: Summarize
@@ -62,7 +67,7 @@ jobs:
           print(f"- Valid unique submissions: {len(r.get('valid_files', []))}")
           print(f"- Top candidate recovered: {'yes' if 'public_top_candidate' in r else 'no'}")
           print(f"- Top majority available: {'yes' if 'top_majority' in r else 'no'}")
-          print("- Exact train/test/sample files included with SHA-256 manifest")
+          print("- Exact competition files and original 50k source included with SHA-256 manifest")
           PY
           else
             echo "- Retrieval failed before report creation" >> "$GITHUB_STEP_SUMMARY"
