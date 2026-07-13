@@ -1,0 +1,84 @@
+name: Kaggle S6E7 Public Artifact Retrieval
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "kaggle_s6e7_public/**"
+      - ".github/workflows/kaggle-s6e7-public-artifacts.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  retrieve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install retrieval tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pandas requests kaggle kagglehub
+
+      - name: Acquire exact competition and original source files
+        run: |
+          git clone --no-tags https://github.com/1644heihei/Kaggle_Predicting_Student_Health_Risk.git competition-mirror
+          cd competition-mirror
+          git checkout eb6228d4633f87aeb7861c6801664dd0df543390
+          cd ..
+          git clone --no-tags https://github.com/the-yuyut/Predicting-Student-Health-Risk.git source-mirror
+          cd source-mirror
+          git checkout e80a8d25923f3a48f530106095aa631163940575
+
+      - name: Retrieve public kernel outputs and submissions
+        run: |
+          mkdir -p public_outputs
+          python kaggle_s6e7_public/retrieve.py \
+            --sample competition-mirror/data/sample_submission.csv \
+            --output public_outputs \
+            2>&1 | tee public_outputs/retrieval.log
+
+      - name: Package exact verified data files
+        run: |
+          mkdir -p public_outputs/exact_data
+          cp competition-mirror/data/train.csv public_outputs/exact_data/
+          cp competition-mirror/data/test.csv public_outputs/exact_data/
+          cp competition-mirror/data/sample_submission.csv public_outputs/exact_data/
+          cp source-mirror/data/original_student_health_50k.csv public_outputs/exact_data/
+          sha256sum public_outputs/exact_data/*.csv > public_outputs/exact_data/SHA256SUMS.txt
+
+      - name: Summarize
+        if: always()
+        run: |
+          echo "### Public artifact retrieval" >> "$GITHUB_STEP_SUMMARY"
+          if test -f public_outputs/public_artifacts_report.json; then
+            python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          from pathlib import Path
+          r = json.loads(Path("public_outputs/public_artifacts_report.json").read_text())
+          print(f"- Valid unique submissions: {len(r.get('valid_files', []))}")
+          print(f"- Top candidate recovered: {'yes' if 'public_top_candidate' in r else 'no'}")
+          print(f"- Top majority available: {'yes' if 'top_majority' in r else 'no'}")
+          print("- Exact competition files and original 50k source included with SHA-256 manifest")
+          PY
+          else
+            echo "- Retrieval failed before report creation" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload retrieved artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kaggle-s6e7-public-artifacts
+          path: public_outputs/
+          if-no-files-found: warn
+          compression-level: 6
+          retention-days: 14
