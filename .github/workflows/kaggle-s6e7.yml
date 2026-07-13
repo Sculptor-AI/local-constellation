@@ -1,0 +1,87 @@
+name: Kaggle S6E7 Autonomous Pipeline
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "kaggle_s6e7/**"
+      - ".github/workflows/kaggle-s6e7.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  train-and-ensemble:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      PYTHONUNBUFFERED: "1"
+      OMP_NUM_THREADS: "2"
+      OPENBLAS_NUM_THREADS: "2"
+      MKL_NUM_THREADS: "2"
+      NUMEXPR_NUM_THREADS: "2"
+    steps:
+      - name: Check out pipeline
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install modeling stack
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install \
+            "numpy<2.4" "pandas>=2.2" "scipy>=1.14" \
+            "scikit-learn>=1.5" "lightgbm>=4.5" "xgboost>=2.1" \
+            requests
+
+      - name: Acquire exact competition data mirror
+        run: |
+          git clone --no-tags https://github.com/1644heihei/Kaggle_Predicting_Student_Health_Risk.git competition-mirror
+          cd competition-mirror
+          git checkout eb6228d4633f87aeb7861c6801664dd0df543390
+          sha256sum data/train.csv data/test.csv data/sample_submission.csv
+          test "$(sha256sum data/train.csv | cut -d' ' -f1)" = "424d744d0344b14b7888b901d79db536f6ffbe73229809a736247ff812416fed"
+          test "$(sha256sum data/test.csv | cut -d' ' -f1)" = "34914866109ab01c806adc25634fef1639d7574368a13d48ebe3037367365e01"
+
+      - name: Train, calibrate, and ensemble
+        run: |
+          mkdir -p outputs
+          python kaggle_s6e7/pipeline.py \
+            --data-dir competition-mirror/data \
+            --output-dir outputs \
+            2>&1 | tee outputs/pipeline.log
+
+      - name: Summarize result
+        if: always()
+        run: |
+          echo "### Kaggle S6E7 autonomous run" >> "$GITHUB_STEP_SUMMARY"
+          if test -f outputs/results.json; then
+            python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          from pathlib import Path
+          r = json.loads(Path("outputs/results.json").read_text())
+          print(f"- Recommended: `{r['recommended']}`")
+          for name, block in r['models'].items():
+              print(f"- {name}: raw OOF={block['raw']['balanced_accuracy']:.6f}; tuned={block['standard_tuned']['balanced_accuracy']:.6f}")
+          print(f"- Blend standard OOF: {r['blend_standard']['balanced_accuracy']:.6f}")
+          print(f"- Blend drift-weighted objective: {r['blend_drift']['weighted_balanced_accuracy']:.6f}")
+          print(f"- Runtime: {r['elapsed_seconds']/60:.1f} minutes")
+          PY
+          else
+            echo "- Pipeline failed before producing results.json" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload submissions and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kaggle-s6e7-results
+          path: outputs/
+          if-no-files-found: warn
+          compression-level: 6
+          retention-days: 14
