@@ -42,6 +42,14 @@ jobs:
             --output public_outputs \
             2>&1 | tee public_outputs/retrieval.log
 
+      - name: Package exact verified competition files
+        run: |
+          mkdir -p public_outputs/exact_data
+          cp competition-mirror/data/train.csv public_outputs/exact_data/
+          cp competition-mirror/data/test.csv public_outputs/exact_data/
+          cp competition-mirror/data/sample_submission.csv public_outputs/exact_data/
+          sha256sum public_outputs/exact_data/*.csv > public_outputs/exact_data/SHA256SUMS.txt
+
       - name: Summarize
         if: always()
         run: |
@@ -54,6 +62,7 @@ jobs:
           print(f"- Valid unique submissions: {len(r.get('valid_files', []))}")
           print(f"- Top candidate recovered: {'yes' if 'public_top_candidate' in r else 'no'}")
           print(f"- Top majority available: {'yes' if 'top_majority' in r else 'no'}")
+          print("- Exact train/test/sample files included with SHA-256 manifest")
           PY
           else
             echo "- Retrieval failed before report creation" >> "$GITHUB_STEP_SUMMARY"
